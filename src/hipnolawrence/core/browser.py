@@ -2,6 +2,7 @@ import os
 import asyncio
 from playwright.async_api import async_playwright
 import playwright_stealth
+from hipnolawrence.human_mouse import HumanMouse
 
 class BrowserManager:
     """
@@ -12,6 +13,9 @@ class BrowserManager:
         self.browser = None
         self.context = None
         self.page = None
+        self.human_mouse = HumanMouse()
+        self.current_mouse_x = 0
+        self.current_mouse_y = 0
 
     async def launch(self):
         """
@@ -84,6 +88,53 @@ class BrowserManager:
         
         await self.page.screenshot(path=screenshot_path)
         print(f"Screenshot salvo em: {screenshot_path}")
+
+    async def click_element(self, selector):
+        """
+        Clica em um elemento usando movimento humano.
+        """
+        if not self.page:
+            raise Exception("Browser not launched. Call launch() first.")
+
+        locator = self.page.locator(selector).first
+        box = await locator.bounding_box()
+
+        if box:
+            target_x = box["x"] + box["width"] / 2
+            target_y = box["y"] + box["height"] / 2
+
+            await self.human_mouse.move_to_coordinates(
+                self.page,
+                self.current_mouse_x,
+                self.current_mouse_y,
+                target_x,
+                target_y
+            )
+
+            self.current_mouse_x = target_x
+            self.current_mouse_y = target_y
+
+            await locator.click()
+
+    async def click_coordinates(self, x: float, y: float):
+        """
+        Clica em coordenadas específicas usando movimento humano.
+        """
+        if not self.page:
+            raise Exception("Browser not launched. Call launch() first.")
+
+        await self.human_mouse.move_to_coordinates(
+            self.page,
+            self.current_mouse_x,
+            self.current_mouse_y,
+            x,
+            y
+        )
+
+        self.current_mouse_x = x
+        self.current_mouse_y = y
+
+        await self.page.mouse.click(x, y)
 
     async def close(self):
         """

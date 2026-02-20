@@ -2,71 +2,78 @@ import json
 import urllib.request
 import urllib.error
 
-class BrainManager:
+class Brain:
     """
-    Cérebro do assistente: processa linguagem natural e define intenções.
-    Modelo: llama3.2:1b (leve e rápido para respostas locais).
+    Processa a intenção do usuário usando um modelo LLM local (Ollama)
+    e retorna comandos estruturados em JSON para o navegador autônomo.
     """
-    def __init__(self, host="http://localhost:11434", model="llama3.2:1b"):
+    def __init__(self, host="http://localhost:11434", model="llama3.2"):
         self.host = host
         self.model = model
         self.api_url = f"{self.host}/api/generate"
-        self.system_prompt = (
-            "Você é HipnoLawrence, um assistente de navegação perspicaz e objetivo. "
-            "Seu objetivo é analisar o comando do usuário e retornar EXCLUSIVAMENTE um JSON válido. "
-            "Campos do JSON: "
-            "1. 'intent': Uma das opções [VER, IR_PARA, CONVERSAR, CLICAR, STATUS, SAIR]. "
-            "2. 'response': Uma resposta curta e natural para o usuário (máx 2 frases). "
-            "3. 'args': Um objeto com parâmetros se necessário (ex: {'url': '...'} para IR_PARA, {'text': '...'} para CLICAR). "
-            "Se o usuário pedir para analisar/ver/olhar a tela, intent é VER. "
-            "Se pedir para ir a um site, intent é IR_PARA. "
-            "Se quiser conversar/perguntar algo geral, intent é CONVERSAR. "
-            "Se quiser clicar em algo, intent é CLICAR. "
-            "Se disser tchau/sair, intent é SAIR. "
-            "Responda APENAS com o JSON, sem markdown ou explicações extras."
-        )
 
-    def process_command(self, user_input):
+    def process_command(self, user_input: str, context: str = "") -> dict:
         """
-        Envia o comando para o Ollama e retorna a intenção estruturada.
+        Envia o comando do usuário para o Ollama e retorna a intenção estruturada.
         """
-        prompt = f"Comando do usuário: '{user_input}'"
-        
+        prompt = f"""
+        Você é o cérebro de um navegador web autônomo. Sua tarefa é analisar o comando do usuário e retornar EXCLUSIVAMENTE um JSON com a intenção e os argumentos necessários.
+        NÃO inclua markdown, explicações ou texto adicional. Apenas o JSON puro.
+
+        Intenções permitidas:
+        - NAVIGATE: Para abrir URLs ou sites. Args: "url" (string).
+        - CLICK: Para clicar em elementos (botões, links, imagens). Args: "target" (descrição textual do elemento).
+        - TYPE: Para digitar texto em campos. Args: "text" (o que digitar), "target" (onde digitar).
+        - EXTRACT: Para ler ou extrair informações da página. Args: "info_to_extract" (o que buscar).
+        - SCROLL: Para rolar a página. Args: "direction" ("up", "down"), "amount" (opcional).
+        - ASK_VISION: Quando o usuário pede para "ver", "analisar" ou "descrever" algo visual na tela. Args: "question" (o que o usuário quer saber).
+        - EXIT: Para fechar o navegador ou encerrar a sessão. Args: {}.
+
+        Contexto atual da página (se houver): "{context}"
+
+        Comando do usuário: "{user_input}"
+
+        Responda APENAS com o JSON:
+        """
+
         payload = {
             "model": self.model,
             "prompt": prompt,
-            "system": self.system_prompt,
             "stream": False,
-            "format": "json"  # Força resposta JSON no modo JSON do Ollama
+            "format": "json"
         }
 
         try:
-            data = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(
-                self.api_url,
-                data=data,
+                self.api_url, 
+                data=json.dumps(payload).encode('utf-8'), 
                 headers={'Content-Type': 'application/json'}
             )
 
             with urllib.request.urlopen(req) as response:
                 result = json.loads(response.read().decode('utf-8'))
-                response_text = result.get('response', '{}')
+                llm_response = result.get("response", "{}")
                 
-                # Tenta parsear o JSON retornado pelo modelo
+                # Tenta parsear a resposta do LLM como JSON
                 try:
-                    return json.loads(response_text)
+                    command_data = json.loads(llm_response)
+                    # Normaliza chaves para minúsculo para consistência interna se necessário, 
+                    # mas o prompt já pede estrutura específica.
+                    return command_data
                 except json.JSONDecodeError:
-                    # Fallback se o modelo falhar em gerar JSON limpo
-                    print(f"Erro ao parsear JSON do cérebro. Resposta crua: {response_text}")
+                    # Fallback se o LLM alucinar texto fora do JSON
                     return {
-                        "intent": "CONVERSAR",
-                        "response": "Desculpe, tive um pensamento confuso. Pode repetir?",
-                        "args": {}
+                        "intent": "ERROR", 
+                        "args": {"error": "Falha no parse do JSON do LLM", "raw_response": llm_response}
                     }
 
+        except urllib.error.URLError as e:
+            return {
+                "intent": "ERROR", 
+                "args": {"error": f"Falha na conexão com Ollama: {e}"}
+            }
         except Exception as e:
             return {
-                "intent": "CONVERSAR",
-                "response": f"Erro de conexão neural: {str(e)}",
-                "args": {}
+                "intent": "ERROR", 
+                "args": {"error": f"Erro inesperado no Brain: {e}"}
             }
