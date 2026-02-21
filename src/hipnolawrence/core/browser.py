@@ -64,11 +64,39 @@ class BrowserManager:
         if not stealth_applied:
             print("Warning: Could not apply stealth settings.")
         
+        # Injeção manual de bypass anti-bot para reforço
+        await self.page.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        window.chrome = { runtime: {} };
+        Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en-US', 'en']});
+        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+        "" home/runner/hipnolawrence
+        """)
+        
         return self.page
+
+    async def dismiss_popups(self):
+        """Tenta fechar popups genéricos que bloqueiam a visão do agente."""
+        if not self.page: return
+        popups = [
+            "text='Não tenho interesse'",
+            "text='Aceitar tudo'",
+            "text='Recusar tudo'",
+            "text='Agora não'"
+        ]
+        for selector in popups:
+            try:
+                loc = self.page.locator(selector).first
+                if await loc.count() > 0 and await loc.is_visible(timeout=500):
+                    await loc.click(timeout=1000)
+                    await asyncio.sleep(0.5)
+            except Exception:
+                continue # Ignora silenciosamente se o botão não existir
 
     async def goto(self, url):
         if not self.page: raise Exception("Browser not launched.")
         await self.page.goto(url)
+        await self.dismiss_popups() # Tenta limpar a tela imediatamente após carregar
 
     async def take_screenshot(self, name):
         if not self.page: raise Exception("Browser not launched.")
