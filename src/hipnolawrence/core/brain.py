@@ -23,13 +23,13 @@ class BrainManager:
         self.interpreter = ActionInterpreter(self.registry)
         self.llm = OllamaClient(model="llama3.2")
         
-        # INJEÇÃO DE IDENTIDADE (Nível 5.1)
+        # INJEÇÃO DE IDENTIDADE (Nível 5.5 - Cientista de Dados LAM)
         self.identity_prompt = """
-        IDENTIDADE: Você é o HipnoLawrence, Agente de Elite do Dr. Victor Lawrence Bernardes Santana.
-        CONTEXTO DO MAESTRO: Dr. Victor é Psicólogo Clínico (CRP 09/012681), especialista em PNL e Marketing.
-        AUTORIDADE: hipnolawrence.com | instagram.com/hipnolawrence | doctoralia.com.br/victor-lawrence-bernardes-santana.
-        DIRETRIZ: Em auditorias, destaque o posicionamento dele em relação aos concorrentes.
-        GROUNDING: Nunca invente números. Se não vir o dado no DOM, peça para o Maestro mudar de aba.
+        IDENTIDADE: Você é o HipnoLawrence, Cientista de Dados e Agente LAM de Elite.
+        CONHECIMENTO: Você possui acesso a 57 variáveis de marketing (ROI, CPA, Impression Share, Qualidade, etc).
+        DIRETRIZ: Ao analisar, não apenas relate os números. Cruze-os. 
+        Exemplo: 'O CTR está alto (X%), mas a Experiência na Página de Destino é Baixa (Y), o que explica o CPA de R$ Z.'
+        GROUNDING: Se o dado na tela divergir da Mega-Matrix, priorize a Matrix como fonte histórica de verdade.
         """
 
     async def process_intent(self, user_input: str) -> Dict[str, Any]:
@@ -45,9 +45,18 @@ class BrainManager:
         # 1. Obter Ferramentas Disponíveis
         tools_desc = self.registry.get_available_tools()
         
-        # 2. PENSAR (Decisão via Ollama)
-        # Prependemos a identidade para que o LLM saiba quem é o Maestro
-        decision = await self.llm.decide_action(f"{self.identity_prompt}\n\nORDEM: {user_input}", tools_desc)
+        # 2. Recuperar Conhecimento (RAG)
+        context_list = self.registry.memory.query_knowledge(user_input)
+        context = "\n".join(context_list) if context_list else "Nenhum dado histórico relevante encontrado."
+        
+        # 3. PENSAR (Decisão via Ollama)
+        full_prompt = (
+            f"{self.identity_prompt}\n\n"
+            f"CONHECIMENTO RECUPERADO DA BIBLIOTECA:\n{context}\n\n"
+            f"ORDEM DO MAESTRO: {user_input}"
+        )
+        
+        decision = await self.llm.decide_action(full_prompt, tools_desc)
         
         if decision.get("tool") in ["none", "error", None]:
             return {
@@ -117,7 +126,12 @@ class BrainManager:
             }
         
         summary = "Ação concluída."
-        if "doctoralia" in tool_name:
+        if tool_name == "spreadsheet_sync":
+            if isinstance(raw_data, list):
+                summary = f"📊 **SINCRONIZAÇÃO MATRIZ DB CONCLUÍDA**\n\nIdentifiquei {len(raw_data)} registros de performance na planilha. Os dados foram integrados à base de conhecimento estratégica."
+            else:
+                summary = f"Aviso de Planilha: {raw_data}"
+        elif "doctoralia" in tool_name:
             if isinstance(raw_data, list):
                 summary = f"Análise Doctoralia concluída. {len(raw_data)} resultados encontrados."
             elif isinstance(raw_data, dict):

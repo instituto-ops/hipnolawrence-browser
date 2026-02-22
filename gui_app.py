@@ -3,6 +3,7 @@ import asyncio
 import threading
 import sys
 import os
+import json
 from datetime import datetime
 from tkinter import filedialog
 from PyPDF2 import PdfReader
@@ -45,6 +46,11 @@ class HipnoLawrenceGUI(ctk.CTk):
         ctk.CTkLabel(self.sidebar, text="GOOGLE ADS CENTER", text_color="#4285F4", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
         ctk.CTkButton(self.sidebar, text="📊 Diagnóstico Geral", command=lambda: self.external_command("Faça um diagnóstico completo desta tela do Google Ads.")).pack(pady=5, padx=20, fill="x")
         ctk.CTkButton(self.sidebar, text="💰 Analisar ROI/CPA", command=lambda: self.external_command("Analise o custo e conversões desta tela.")).pack(pady=5, padx=20, fill="x")
+        ctk.CTkButton(self.sidebar, 
+                      text="🔄 Sincronizar Matriz BD", 
+                      fg_color="#0F9D58", # Verde Google
+                      command=lambda: self.external_command("Sincronize os dados da Planilha NeuroStrategy")
+                     ).pack(pady=5, padx=20, fill="x")
 
         # SEÇÃO: MARKET INTELLIGENCE (MACROS)
         ctk.CTkLabel(self.sidebar, text="MARKET INTELLIGENCE", text_color="#F4B400", font=ctk.CTkFont(weight="bold")).pack(pady=(20, 5))
@@ -204,6 +210,51 @@ class HipnoLawrenceGUI(ctk.CTk):
         except Exception as e:
             self.append_thought(f"❌ Erro ao limpar cache: {e}")
 
+    async def _sync_spreadsheet_data(self):
+        """Sincronização Profunda: Mapeia Performance, Intenção e Leilão."""
+        try:
+            self.append_thought("📡 Iniciando Sincronização Profunda (Performance + Intenção + Leilão)...")
+            from hipnolawrence.core.spreadsheet import SpreadsheetManager
+            sm = SpreadsheetManager()
+            
+            if sm.connect():
+                matrix = sm.get_full_matrix()
+                if matrix:
+                    # 1. Processa Performance (Gerador de Fatos Dinâmicos)
+                    for row in matrix['performance']:
+                        details = ", ".join([f"{k}: {v}" for k, v in row.items() if v])
+                        fact = f"Performance Mega-Report: {details}"
+                        self.brain.registry.memory.add_knowledge(fact, source="sheet_perf")
+                    
+                    # 2. Processa Intenção (Fatos de Termos e CPA)
+                    for row in matrix['demand']:
+                        details = ", ".join([f"{k}: {v}" for k, v in row.items() if v])
+                        fact = f"Estratégia/Intenção: {details}"
+                        self.brain.registry.memory.add_knowledge(fact, source="sheet_demand")
+                    
+                    # 3. Processa Competitividade (Leilão)
+                    for row in matrix['competitive']:
+                        fact = f"Concorrência: Na campanha {row.get('Campanha')}, perdemos {row.get('Perda IS (Orçamento)')} de visualizações por falta de verba."
+                        self.brain.registry.memory.add_knowledge(fact, source="sheet_comp")
+                    
+                    # 4. Processa Configurações (Mega-Matrix v2)
+                    if matrix.get('config'):
+                        for row in matrix['config']:
+                            # Filtra apenas campos com valores para não poluir o prompt
+                            active_data = {k: v for k, v in row.items() if v and v != '--'}
+                            knowledge_chunk = f"AUDITORIA COMPLETA CAMPANHA {row.get('Campanha_ID', row.get('Campanha'))}: " + json.dumps(active_data)
+                            self.brain.registry.memory.add_knowledge(knowledge_chunk, source="mega_matrix_v2")
+
+                    self.append_message("Sistema", "Mega-Matrix Sincronizada. 57 variáveis integradas ao Cérebro.")
+                    self.append_thought("✅ Sincronização profunda concluída com sucesso.")
+                else:
+                    self.append_message("Sistema", "Falha ao recuperar a matriz completa da planilha.")
+            else:
+                self.append_message("Sistema", "Erro de conexão com o Google Sheets. Verifique o service_account.json.")
+        except Exception as e:
+            self.append_thought(f"❌ ERRO NO SYNC: {e}")
+            self.append_message("Sistema", f"Erro crítico na sincronização profunda: {e}")
+
     def send_command(self):
         """Envia a ordem do Maestro para o Cérebro."""
         cmd = self.entry.get().strip()
@@ -216,6 +267,10 @@ class HipnoLawrenceGUI(ctk.CTk):
         """Ciclo ReAct completo com monitoramento na Thought Box."""
         try:
             self.append_thought("Iniciando raciocínio...")
+            
+            if any(x in user_input.lower() for x in ["sincronize", "sincronizar"]):
+                await self._sync_spreadsheet_data()
+                return
             
             # 1. Radar DOM
             self.append_thought("📡 Mapeando Árvore de Acessibilidade...")

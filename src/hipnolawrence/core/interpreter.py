@@ -67,6 +67,10 @@ class ActionInterpreter:
                 # Não requer argumentos, pois lê a tela atual/dashboard
                 result = await self.registry.run_ads_visual_extraction()
 
+            # --- Roteamento Spreadsheet (NeuroStrategy DB) ---
+            elif tool_name == "spreadsheet_sync":
+                result = await self.registry.run_spreadsheet_sync()
+
             else:
                 return {"status": "error", "message": f"Ferramenta '{tool_name}' desconhecida ou não implementada."}
 

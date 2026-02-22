@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional
 from hipnolawrence.core.doctoralia_intelligence import DoctoraliaIntelligence
 from hipnolawrence.core.visual_ads import VisualAdsManager
 from hipnolawrence.core.memory import MemoryManager
+from hipnolawrence.core.spreadsheet import SpreadsheetManager
 
 logger = logging.getLogger("HipnoLawrence.Tools")
 
@@ -16,6 +17,7 @@ class ToolRegistry:
         self._doctoralia_intel = None
         self._browser_page = browser_page
         self.memory = MemoryManager()
+        self.spreadsheet = SpreadsheetManager()
 
     @property
     def ads(self) -> VisualAdsManager:
@@ -40,7 +42,8 @@ class ToolRegistry:
         return {
             "doctoralia_ranking": "Busca direta na Doctoralia (comportamento humano).",
             "doctoralia_serp": "Busca indireta via Google Search (mais seguro contra bloqueios).",
-            "google_ads_visual": "Extrai dados de campanhas e screenshots do painel Google Ads via navegação visual."
+            "google_ads_visual": "Extrai dados de campanhas e screenshots do painel Google Ads via navegação visual.",
+            "spreadsheet_sync": "Sincroniza e extrai dados da Matriz NeuroStrategy DB via Google Sheets."
         }
 
     # --- Wrappers ---
@@ -58,3 +61,7 @@ class ToolRegistry:
     async def run_doctoralia_scan(self, specialty: str, city: str):
         if not self.doctoralia: return "Erro: Browser não conectado."
         return await self.doctoralia.scan_ranking_direct(specialty, city)
+
+    async def run_spreadsheet_sync(self):
+        """Wrapper para sincronizar dados da planilha."""
+        return self.spreadsheet.get_performance_summary()

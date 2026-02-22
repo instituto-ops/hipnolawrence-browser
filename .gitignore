@@ -28,3 +28,6 @@ data/
 downloads/
 screenshots/
 user_data/
+
+# Credentials
+service_account.json
