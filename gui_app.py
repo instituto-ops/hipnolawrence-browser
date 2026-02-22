@@ -276,8 +276,9 @@ class HipnoLawrenceGUI(ctk.CTk):
             self.append_thought(f"👁️ {len(dom_elements)} elementos capturados.")
 
             # 2. Inferência
-            self.append_thought("🧠 Consultando Cérebro (Ollama)...")
-            result = await self.brain.process_intent(user_input)
+            self.append_thought("🧠 Enviando contexto para IA (Aguardando inferência assíncrona)...")
+            current_url = self.browser.page.url if self.browser.page else ""
+            result = await self.brain.process_command(user_input, dom_elements=dom_elements, current_url=current_url)
             
             # 3. Resposta
             self.append_thought(f"✅ Ação Concluída: {result.get('action_taken')}")

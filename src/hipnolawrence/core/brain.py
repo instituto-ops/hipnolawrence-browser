@@ -1,7 +1,8 @@
-import logging
-import asyncio
-import os
 import json
+import httpx  # Substitui urllib para não bloquear o event loop
+import sys
+import os
+import logging
 from typing import Dict, Any, Optional
 
 # Integração com Ferramentas, Interpretador e LLM
@@ -14,14 +15,16 @@ logger = logging.getLogger("HipnoLawrence.Brain")
 
 class BrainManager:
     """
-    Núcleo Cognitivo Neural (ReAct + Ollama).
+    Núcleo Cognitivo Neural (ReAct + Ollama) - Versão Assíncrona.
     """
 
     def __init__(self, page=None):
         self.page = page
         self.registry = ToolRegistry(browser_page=page)
         self.interpreter = ActionInterpreter(self.registry)
-        self.llm = OllamaClient(model="llama3.2")
+        self.model = "llama3.2"
+        self.host = "http://localhost:11434"
+        self.llm = OllamaClient(model=self.model, base_url=self.host)
         
         # INJEÇÃO DE IDENTIDADE (Nível 5.5 - Cientista de Dados LAM)
         self.identity_prompt = """
@@ -32,54 +35,58 @@ class BrainManager:
         GROUNDING: Se o dado na tela divergir da Mega-Matrix, priorize a Matrix como fonte histórica de verdade.
         """
 
-    async def process_intent(self, user_input: str) -> Dict[str, Any]:
+    async def process_command(self, user_input, dom_elements=None, current_url="", history=""):
         """
-        Ciclo Cognitivo Completo:
-        1. Identifica Tools disponíveis.
-        2. Consulta o LLM para decidir ação.
-        3. Executa a ação via Interpreter.
-        4. Retorna resultado.
+        Versão Assíncrona da Inferência Brain.
         """
-        logger.info(f"🧠 Cérebro processando (Neural): '{user_input}'")
-        
-        # 1. Obter Ferramentas Disponíveis
+        user_input_lower = user_input.lower()
+        if dom_elements is None: dom_elements = []
+
+        # 1. Obter Ferramentas e Contexto
         tools_desc = self.registry.get_available_tools()
-        
-        # 2. Recuperar Conhecimento (RAG)
         context_list = self.registry.memory.query_knowledge(user_input)
-        context = "\n".join(context_list) if context_list else "Nenhum dado histórico relevante encontrado."
+        context = "\n".join(context_list) if context_list else "Sem dados históricos."
         
-        # 3. PENSAR (Decisão via Ollama)
+        # 2. Montar Prompt
         full_prompt = (
             f"{self.identity_prompt}\n\n"
-            f"CONHECIMENTO RECUPERADO DA BIBLIOTECA:\n{context}\n\n"
+            f"URL ATUAL: {current_url}\n"
+            f"DOM RELEVANTE: {dom_elements}\n"
+            f"CONHECIMENTO RECUPERADO:\n{context}\n\n"
             f"ORDEM DO MAESTRO: {user_input}"
         )
-        
-        decision = await self.llm.decide_action(full_prompt, tools_desc)
-        
-        if decision.get("tool") in ["none", "error", None]:
-            return {
-                "response": f"Não consegui decidir uma ação clara. (Erro: {decision.get('args')})",
-                "action_taken": None
-            }
 
-        # 3. AGIR (Execução via Interpreter)
-        tool_name = decision.get("tool")
-        logger.info(f"🤖 LLM Decidiu: Executar [{tool_name}] com args {decision.get('args')}")
-        
-        # Serializa para o formato que o interpreter espera (string JSON)
-        action_json_str = json.dumps(decision)
-        action_result = await self.interpreter.execute_action(action_json_str)
+        # --- CAMADA 3: INFERÊNCIA LLM (AGORA 100% ASSÍNCRONA) ---
+        try:
+            url = self.host + "/api/generate"
+            payload = {"model": self.model, "prompt": full_prompt, "stream": False, "format": "json"}
 
-        # 4. OBSERVAR (Síntese do Resultado)
-        if action_result["status"] == "success":
-            return await self._synthesize_result(tool_name, action_result["result"])
-        else:
-            return {
-                "response": f"Erro na execução da ferramenta: {action_result.get('message')}",
-                "action_taken": None
-            }
+            # Utiliza httpx com timeout adequado para não bloquear a GUI
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                result = response.json()
+                
+                try: 
+                    action_json = json.loads(result.get("response", "{}"))
+                except: 
+                    return {"response": "Erro no parse do JSON gerado.", "action_taken": "error"}
+                
+                # Para compatibilidade com gui_app.py atual, executamos a ferramenta se decidida
+                if action_json.get("tool") and action_json.get("tool") != "none":
+                    tool_name = action_json.get("tool")
+                    logger.info(f"🤖 LLM Decidiu: Executar [{tool_name}]")
+                    
+                    action_result = await self.interpreter.execute_action(json.dumps(action_json))
+                    if action_result["status"] == "success":
+                        return await self._synthesize_result(tool_name, action_result["result"])
+                    else:
+                        return {"response": f"Erro na execução: {action_result.get('message')}", "action_taken": tool_name}
+
+                return {"response": action_json.get("args", {}).get("text", "Não entendi a ordem ou ferramenta indisponível."), "action_taken": "none"}
+
+        except Exception as e:
+            return {"response": f"Erro de Inferência Brain: {str(e)}", "action_taken": "error"}
 
     async def _synthesize_result(self, tool_name: str, raw_data: Any) -> Dict:
         """Motor de Síntese: Transforma dados brutos em Relatório Estratégico."""
@@ -97,7 +104,7 @@ class BrainManager:
             if os.path.exists(snap_path):
                 from hipnolawrence.core.vision import VisionManager
                 vision = VisionManager() # Instancia localmente para o relatório
-                visual_analysis = vision.analyze_screenshot(
+                visual_analysis = await vision.analyze_screenshot(
                     snap_path, 
                     "Resuma os números de Cliques e Impressões desta tela. Há algum aviso de erro ou configuração pendente?"
                 )

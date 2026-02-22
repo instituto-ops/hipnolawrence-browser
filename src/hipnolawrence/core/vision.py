@@ -1,12 +1,15 @@
 import os
 import base64
 import json
-import urllib.request
-import urllib.error
+import httpx
+import logging
+
+logger = logging.getLogger("HipnoLawrence.Vision")
 
 class VisionManager:
     """
     Gerencia a comunicação com a API local do Ollama para análise de imagens.
+    Versão Assíncrona.
     """
 
     def __init__(self, host="http://localhost:11434", model="moondream"):
@@ -27,40 +30,32 @@ class VisionManager:
         except Exception as e:
             raise Exception(f"Erro ao converter imagem em Base64: {e}")
 
-    def analyze_screenshot(self, image_path, prompt="Descreva esta imagem em detalhes."):
+    async def analyze_screenshot(self, image_path, prompt="Descreva esta imagem em detalhes."):
         """
         Envia a imagem para o Ollama (modelo moondream) e retorna a descrição.
         """
         try:
-            print(f"Codificando imagem: {image_path}")
+            logger.info(f"Codificando imagem: {image_path}")
             image_base64 = self._encode_image(image_path)
             
             payload = {
                 "model": self.model,
                 "prompt": prompt,
                 "images": [image_base64],
-                "stream": False  # Receber resposta completa de uma vez
+                "stream": False
             }
 
-            data = json.dumps(payload).encode('utf-8')
-            
-            print(f"Enviando para Ollama ({self.model})...")
-            req = urllib.request.Request(
-                self.api_url,
-                data=data,
-                headers={'Content-Type': 'application/json'}
-            )
-
-            with urllib.request.urlopen(req) as response:
-                result = json.loads(response.read().decode('utf-8'))
+            logger.info(f"Enviando para Ollama ({self.model})...")
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(self.api_url, json=payload)
+                response.raise_for_status()
+                result = response.json()
                 
                 if 'response' in result:
                     return result['response']
                 else:
                     return f"Resposta inesperada do Ollama: {result}"
 
-        except urllib.error.URLError as e:
-            return f"Erro de conexão com o Ollama: {e}. Verifique se o serviço está rodando."
         except Exception as e:
             return f"Erro ao analisar a imagem: {e}"
 
