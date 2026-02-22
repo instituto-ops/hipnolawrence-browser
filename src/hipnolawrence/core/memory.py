@@ -56,6 +56,19 @@ class MemoryManager:
         })
         self._save_db()
 
+    def add_csv_knowledge(self, file_path: str):
+        """Lê CSV e transforma cada linha em um fato para a biblioteca."""
+        import csv
+        if not os.path.exists(file_path): return
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    fact = f"Relatório Ads: Em {row.get('Data', 'N/A')}, houve {row.get('Cliques', '0')} cliques."
+                    self.add_knowledge(fact, source=os.path.basename(file_path))
+        except Exception as e:
+            print(f"Erro ao processar CSV: {e}")
+
     def query_knowledge(self, query_text, n_results=2):
         q_vec = self.get_embedding(query_text)
         if not q_vec or not self.collection: return []

@@ -1,81 +1,130 @@
-import json
-import urllib.request
-import urllib.error
-import sys
+import logging
+import asyncio
 import os
+import json
+from typing import Dict, Any, Optional
 
-try:
-    from hipnolawrence.core.memory import MemoryManager
-except ImportError:
-    from src.hipnolawrence.core.memory import MemoryManager
+# Integração com Ferramentas, Interpretador e LLM
+from hipnolawrence.core.tools import ToolRegistry
+from hipnolawrence.core.interpreter import ActionInterpreter
+from hipnolawrence.core.llm import OllamaClient
 
-class Brain:
-    def __init__(self, host="http://localhost:11434", model="llama3.2"):
-        self.host = host
-        self.model = model
-        self.memory = MemoryManager()
-        # BIBLIOTECA DE ATALHOS (Navegação Rápida e OSINT)
-        self.library = {
-            "google ads": "https://ads.google.com/aw/overview",
-            "minha conta": "https://ads.google.com/aw/overview",
-            "doctoralia": "https://www.google.com.br/search?q=site:doctoralia.com.br+psicologo+goiania",
-            "instagram": "https://www.instagram.com/",
-            "business": "https://business.google.com/br/google-ads/",
-            "whatsapp": "https://web.whatsapp.com/"
-        }
+# Configuração de Logs
+logger = logging.getLogger("HipnoLawrence.Brain")
 
-    def process_command(self, user_input, dom_elements=None, current_url="", history=""):
-        user_input_lower = user_input.lower()
-        if dom_elements is None: dom_elements = []
+class BrainManager:
+    """
+    Núcleo Cognitivo Neural (ReAct + Ollama).
+    """
 
-        if current_url:
-            cached_action = self.memory.get_action(current_url.split("?")[0], user_input)
-            if cached_action: return {"intent": "FAST_ACT", "args": cached_action}
-
-        for key, url in self.library.items():
-            if key in user_input_lower and any(v in user_input_lower for v in ["abra", "acesse", "vá"]):
-                return {"intent": "NAVIGATE", "args": {"url": url}}
-
-        dom_map = ""
-        if dom_elements:
-            dom_map = "DADOS EXTRAÍDOS DA TELA (Use para análise):\n"
-            for el in dom_elements[:60]:
-                dom_map += f"[{el['id']}] {el['text']}\n"
-
-        relevant_mem = self.memory.query_knowledge(user_input)
-        context = "\n".join(relevant_mem) if relevant_mem else "Sem diretrizes extras."
-
-        # DIRETRIZ DE IDENTIDADE E GROUNDING
-        system_instructions = (
-            "PERSONA E IDENTIDADE: Você é o Analista Estratégico de Elite (HipnoLawrence). "
-            "Você trabalha PARA o Dr. Victor Lawrence Bernardes Santana (Psicólogo Clínico, CRP 09/012681, Goiânia). "
-            "A pegada digital dele (O Maestro) inclui: hipnolawrence.com, instagram.com/hipnolawrence, "
-            "doctoralia.com.br/victor-lawrence-bernardes-santana, lattes.cnpq.br/7486371353673780 e WhatsApp Oficial. "
-            "Se for pedido um diagnóstico de posicionamento, procure por esses links e destaque o domínio dele nos resultados.\n\n"
-            "REGRA DE OURO (GROUNDING): Você NÃO PODE inventar métricas ou nomes. "
-            "Baseie-se EXCLUSIVAMENTE no mapa 'DADOS EXTRAÍDOS DA TELA' abaixo. "
-            "Se não encontrar a resposta, diga que os dados não estão visíveis.\n\n"
-            "CONHECIMENTO DA BIBLIOTECA:\n" + context + "\n\n"
-            "INTENÇÕES PERMITIDAS:\n"
-            "- ACT: {\"intent\": \"ACT\", \"args\": {\"id\": <id numérico>, \"action\": \"click|type\"}}\n"
-            "- EXTRACT: {\"intent\": \"EXTRACT\", \"args\": {\"data\": \"<Relatório baseado nos dados extraídos>\"}}\n"
-            "- ASK_VISION: {\"intent\": \"ASK_VISION\", \"args\": {\"question\": \"<pergunta>\"}}\n"
-            "- REPLY: {\"intent\": \"REPLY\", \"args\": {\"text\": \"<resposta>\"}}\n"
-        )
+    def __init__(self, page=None):
+        self.page = page
+        self.registry = ToolRegistry(browser_page=page)
+        self.interpreter = ActionInterpreter(self.registry)
+        self.llm = OllamaClient(model="llama3.2")
         
-        full_prompt = f"{system_instructions}\n\n{dom_map}\n\nUsuário: {user_input}"
+        # INJEÇÃO DE IDENTIDADE (Nível 5.1)
+        self.identity_prompt = """
+        IDENTIDADE: Você é o HipnoLawrence, Agente de Elite do Dr. Victor Lawrence Bernardes Santana.
+        CONTEXTO DO MAESTRO: Dr. Victor é Psicólogo Clínico (CRP 09/012681), especialista em PNL e Marketing.
+        AUTORIDADE: hipnolawrence.com | instagram.com/hipnolawrence | doctoralia.com.br/victor-lawrence-bernardes-santana.
+        DIRETRIZ: Em auditorias, destaque o posicionamento dele em relação aos concorrentes.
+        GROUNDING: Nunca invente números. Se não vir o dado no DOM, peça para o Maestro mudar de aba.
+        """
 
-        try:
-            url = self.host + "/api/generate"
-            data = {"model": self.model, "prompt": full_prompt, "stream": False, "format": "json"}
-            req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                action = json.loads(result.get("response", "{}"))
-                
-                if any(w in user_input_lower for w in ["diagnóstico", "análise", "roi"]) and action.get("intent") == "REPLY":
-                    action["intent"] = "EXTRACT"
-                    action["args"] = {"data": action["args"].get("text", "Iniciando análise...")}
-                
-                return action
-        except: return {"intent": "REPLY", "args": {"text": "Erro no processamento neural."}}
+    async def process_intent(self, user_input: str) -> Dict[str, Any]:
+        """
+        Ciclo Cognitivo Completo:
+        1. Identifica Tools disponíveis.
+        2. Consulta o LLM para decidir ação.
+        3. Executa a ação via Interpreter.
+        4. Retorna resultado.
+        """
+        logger.info(f"🧠 Cérebro processando (Neural): '{user_input}'")
+        
+        # 1. Obter Ferramentas Disponíveis
+        tools_desc = self.registry.get_available_tools()
+        
+        # 2. PENSAR (Decisão via Ollama)
+        # Prependemos a identidade para que o LLM saiba quem é o Maestro
+        decision = await self.llm.decide_action(f"{self.identity_prompt}\n\nORDEM: {user_input}", tools_desc)
+        
+        if decision.get("tool") in ["none", "error", None]:
+            return {
+                "response": f"Não consegui decidir uma ação clara. (Erro: {decision.get('args')})",
+                "action_taken": None
+            }
+
+        # 3. AGIR (Execução via Interpreter)
+        tool_name = decision.get("tool")
+        logger.info(f"🤖 LLM Decidiu: Executar [{tool_name}] com args {decision.get('args')}")
+        
+        # Serializa para o formato que o interpreter espera (string JSON)
+        action_json_str = json.dumps(decision)
+        action_result = await self.interpreter.execute_action(action_json_str)
+
+        # 4. OBSERVAR (Síntese do Resultado)
+        if action_result["status"] == "success":
+            return await self._synthesize_result(tool_name, action_result["result"])
+        else:
+            return {
+                "response": f"Erro na execução da ferramenta: {action_result.get('message')}",
+                "action_taken": None
+            }
+
+    async def _synthesize_result(self, tool_name: str, raw_data: Any) -> Dict:
+        """Motor de Síntese: Transforma dados brutos em Relatório Estratégico."""
+        
+        if tool_name == "google_ads_visual":
+            rows = raw_data.get("table_data", [])
+            # FILTRO: Remove linhas que parecem ser apenas ícones ou lixo de interface
+            filtered_rows = [r for r in rows if len(r['name']) > 5 and "expand_more" not in r['name']]
+            
+            snap_path = raw_data.get("snapshot_path")
+            
+            # 1. Chamada de Visão Computacional (Moondream) para análise qualitativa
+            logger.info("Solicitando análise qualitativa ao Moondream...")
+            visual_analysis = "Análise visual indisponível."
+            if os.path.exists(snap_path):
+                from hipnolawrence.core.vision import VisionManager
+                vision = VisionManager() # Instancia localmente para o relatório
+                visual_analysis = vision.analyze_screenshot(
+                    snap_path, 
+                    "Resuma os números de Cliques e Impressões desta tela. Há algum aviso de erro ou configuração pendente?"
+                )
+
+            # 2. Construção do Relatório Final
+            report = f"📊 **AUDITORIA ESTRATÉGICA GOOGLE ADS**\n\n"
+            report += f"✅ **Campanhas Ativas Identificadas:** {len(filtered_rows)}\n"
+            for r in filtered_rows:
+                report += f"- **{r['name']}**: Status {r['status']} | Orçamento {r['budget']}\n"
+            
+            report += f"\n👁️ **VISÃO COMPUTACIONAL:**\n{visual_analysis}\n"
+            report += f"\n💡 **INSIGHT DO ESPECIALISTA:**\n"
+            
+            # Feedback do Llama 3.2
+            try:
+                final_prompt = f"Com base nessas campanhas: {filtered_rows} e nesta visão: {visual_analysis}, dê um conselho estratégico curto para o Dr. Victor."
+                feedback = await self.llm.decide_action(final_prompt, {"reply": "texto"})
+                report += feedback.get("args", {}).get("text", "O sistema está processando os dados para o próximo passo.")
+            except:
+                report += "A análise visual foi concluída, mas o feedback textual expirou. Tente novamente."
+
+            return {
+                "response": report,
+                "data": raw_data,
+                "action_taken": tool_name
+            }
+        
+        summary = "Ação concluída."
+        if "doctoralia" in tool_name:
+            if isinstance(raw_data, list):
+                summary = f"Análise Doctoralia concluída. {len(raw_data)} resultados encontrados."
+            elif isinstance(raw_data, dict):
+                summary = f"Perfil analisado: {raw_data.get('url', 'URL Desconhecida')}"
+
+        return {
+            "response": summary,
+            "data": raw_data,
+            "action_taken": tool_name
+        }
