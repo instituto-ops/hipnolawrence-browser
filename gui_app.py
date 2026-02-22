@@ -12,13 +12,11 @@ from docx import Document
 # Garante que o diretório src esteja no path para chamadas internas
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
-# Imports internos com tratamento de erro
-try:
-    from hipnolawrence.core.browser import BrowserManager
-    from hipnolawrence.core.brain import BrainManager
-    from hipnolawrence.core.dom_observer import DOMObserver
-except ImportError as e:
-    print(f"Erro de Importação Interna: {e}")
+# Importações Internas Críticas (Sem try/except permissivo)
+from hipnolawrence.core.browser import BrowserManager
+from hipnolawrence.core.brain import BrainManager
+from hipnolawrence.core.vision import VisionManager
+from hipnolawrence.core.dom_observer import DOMObserver
 
 class HipnoLawrenceGUI(ctk.CTk):
     def __init__(self):

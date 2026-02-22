@@ -14,43 +14,33 @@ class SpreadsheetManager:
         self.client = None
 
     def connect(self):
-        """Conecta usando as credenciais (Assume que service_account.json existe na raiz)."""
+        """Conecta usando as credenciais de Conta de Serviço."""
         try:
             scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-            # Maestro: Você precisará colocar o arquivo 'service_account.json' na raiz do projeto
-            creds_path = os.path.join(os.getcwd(), 'service_account.json')
-            if not os.path.exists(creds_path):
-                logger.error("Arquivo service_account.json não encontrado na raiz.")
+            key_path = os.path.join(os.getcwd(), 'service_account.json')
+            
+            if not os.path.exists(key_path):
+                logger.error(f"Arquivo de credenciais não encontrado em: {key_path}")
                 return False
                 
-            creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+            creds = ServiceAccountCredentials.from_json_keyfile_name(key_path, scope)
             self.client = gspread.authorize(creds)
+            logger.info("Conexão com Google Sheets autorizada via Service Account.")
             return True
         except Exception as e:
-            logger.error(f"Falha na conexão com Google Sheets: {e}")
+            logger.error(f"Falha na autenticação com Google Sheets: {e}", exc_info=True)
             return False
 
-    def get_performance_summary(self):
-        """Lê a Mega-Matrix CAMPAIGN_Config e retorna registros mapeados."""
-        if not self.client: 
-            if not self.connect():
-                return []
-        try:
-            sheet = self.client.open_by_key(self.sheet_id).worksheet("CAMPAIGN_Config")
-            # get_all_records() mapeia automaticamente os 57 cabeçalhos como chaves
-            data = sheet.get_all_records()
-            return data
-        except Exception as e:
-            logger.error(f"Falha ao ler Mega-Matrix: {e}")
-            return []
-
     def get_full_matrix(self):
-        """Lê todas as abas estratégicas e retorna um pacotão de dados."""
+        """Lê todas as abas estratégicas, incluindo o Gabarito de Configuração."""
         if not self.client: 
-            if not self.connect():
-                return None
+            logger.error("Tentativa de ler planilha sem cliente conectado.")
+            return None
+            
         try:
             doc = self.client.open_by_key(self.sheet_id)
+            logger.info("Planilha localizada com sucesso. Iniciando download de abas...")
+            
             return {
                 "performance": doc.worksheet("ADS_Performance").get_all_records(),
                 "demand": doc.worksheet("INTENTION_Demand").get_all_records(),
@@ -58,5 +48,5 @@ class SpreadsheetManager:
                 "config": doc.worksheet("CAMPAIGN_Config").get_all_records()
             }
         except Exception as e:
-            logger.error(f"Erro ao ler matriz completa: {e}")
+            logger.error(f"Erro fatal ao ler matriz completa: {e}", exc_info=True)
             return None

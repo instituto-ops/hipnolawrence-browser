@@ -3,3 +3,7 @@ httpx>=0.25.0
 customtkinter>=5.2.0
 Pillow>=10.0.0
 asyncio
+gspread>=5.12.0
+oauth2client>=4.1.3
+PyPDF2>=3.0.0
+python-docx>=1.1.0
